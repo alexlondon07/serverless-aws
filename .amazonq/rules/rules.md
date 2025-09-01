@@ -1,5 +1,5 @@
-Estas son las reglas para Q:
-- Este es un proyecto en Node.js usando Serverless Framework
-- Usa AWS Lambda, API Gateway y SQS
-- Quiero generar documentación en markdown
-- También quiero visualizar la arquitectura con un diagrama
+These are the rules for Q:
+- This is a Node.js project using Serverless Framework.
+- Uses AWS Lambda, API Gateway, SQS, DynamoDB,
+- I want to generate documentation in markdown
+- I also want to visualize the architecture with a diagram
