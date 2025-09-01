@@ -1,0 +1,63 @@
+app: test
+
+service: pizzaApp
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: us-east-1
+  environment:
+    REGION: ${self:provider.region}
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - "sqs:sendMessage"
+          Resource:
+            - Fn::GetAtt: [PendingOrderQueue, Arn]
+        - Effect: "Allow"
+          Action:
+            - "sqs:sendMessage"
+          Resource:
+            - Fn::GetAtt: [OrderstoSendQueue, Arn]
+
+functions:
+  newOrder:
+    handler: handler.newOrder
+    environment:
+      PENDING_ORDER_QUEUE_URL:
+        Ref: PendingOrderQueue
+    events:
+      - httpApi:
+          path: /order
+          method: post
+  getOrder:
+    handler: handler.getOrder
+    events:
+      - httpApi:
+          path: /order/{orderId}
+          method: get
+  prepOrder:
+    handler: handler.prepOrder
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [PendingOrderQueue, Arn]
+          batchSize: 1
+  sendOrder:
+    handler: handler.sendOrder
+    environment:
+      ORDERS_TO_SEND_QUEUE_URL:
+        Ref: OrderstoSendQueue
+
+resources: # Define the SQS queue as a resource CloudFormation template
+  Resources:
+    PendingOrderQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: pendingOrderQueue
+    OrderstoSendQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ordersToSendQueue
