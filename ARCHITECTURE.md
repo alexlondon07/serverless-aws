@@ -1,21 +1,21 @@
-# Diagrama de Arquitectura AWS - Pizza App
+# AWS Architecture Diagram - Pizza App
 
-## Arquitectura Completa
+## Complete Architecture
 
 ```mermaid
 graph TB
-    Client[Cliente/Frontend] --> APIGW[API Gateway]
+    Client[Client/Frontend] --> APIGW[API Gateway]
     
     APIGW --> |POST /order| NewOrder[λ newOrder]
     APIGW --> |GET /order/{id}| GetOrder[λ getOrder]
     
-    NewOrder --> |Envía mensaje| PendingQueue[(SQS: pendingOrderQueue)]
+    NewOrder --> |Send message| PendingQueue[(SQS: pendingOrderQueue)]
     
-    PendingQueue --> |Trigger SQS| PrepOrder[λ prepOrder]
+    PendingQueue --> |SQS Trigger| PrepOrder[λ prepOrder]
     
-    PrepOrder --> |Procesa orden| SendOrder[λ sendOrder]
+    PrepOrder --> |Process order| SendOrder[λ sendOrder]
     
-    SendOrder --> |Envía mensaje| SendQueue[(SQS: ordersToSendQueue)]
+    SendOrder --> |Send message| SendQueue[(SQS: ordersToSendQueue)]
     
     subgraph "AWS Lambda Functions"
         NewOrder
@@ -39,11 +39,11 @@ graph TB
     SendOrder -.-> IAMRole
 ```
 
-## Flujo de Datos Detallado
+## Detailed Data Flow
 
 ```mermaid
 sequenceDiagram
-    participant C as Cliente
+    participant C as Client
     participant AG as API Gateway
     participant NO as λ newOrder
     participant PQ as SQS pendingOrderQueue
@@ -52,51 +52,51 @@ sequenceDiagram
     participant SQ as SQS ordersToSendQueue
     participant GO as λ getOrder
     
-    Note over C,SQ: Flujo de Creación de Orden
+    Note over C,SQ: Order Creation Flow
     C->>AG: POST /order {pizza, customerId}
     AG->>NO: Invoke newOrder
-    NO->>NO: Generar UUID
+    NO->>NO: Generate UUID
     NO->>PQ: SendMessage(order)
     NO->>AG: Response {orderId, status}
     AG->>C: 200 OK {order details}
     
-    Note over PQ,SQ: Procesamiento Asíncrono
+    Note over PQ,SQ: Asynchronous Processing
     PQ->>PO: SQS Trigger (batchSize: 1)
-    PO->>PO: Procesar orden
+    PO->>PO: Process order
     PO->>SO: Invoke sendOrder
     SO->>SQ: SendMessage(processedOrder)
     
-    Note over C,GO: Consulta de Orden
+    Note over C,GO: Order Query
     C->>AG: GET /order/{orderId}
     AG->>GO: Invoke getOrder
     GO->>AG: Response {order details}
     AG->>C: 200 OK {order status}
 ```
 
-## Componentes AWS
+## AWS Components
 
 ### 🔧 Lambda Functions
 
-| Función | Runtime | Memoria | Timeout | Trigger |
-|---------|---------|---------|---------|---------|
-| newOrder | Node.js 20.x | 128MB | 6s | HTTP API |
-| getOrder | Node.js 20.x | 128MB | 6s | HTTP API |
-| prepOrder | Node.js 20.x | 128MB | 6s | SQS Event |
-| sendOrder | Node.js 20.x | 128MB | 6s | Manual/Code |
+| Function  | Runtime      | Memory | Timeout | Trigger     |
+| --------- | ------------ | ------ | ------- | ----------- |
+| newOrder  | Node.js 20.x | 128MB  | 6s      | HTTP API    |
+| getOrder  | Node.js 20.x | 128MB  | 6s      | HTTP API    |
+| prepOrder | Node.js 20.x | 128MB  | 6s      | SQS Event   |
+| sendOrder | Node.js 20.x | 128MB  | 6s      | Manual/Code |
 
 ### 📨 SQS Queues
 
-| Queue | Tipo | Retention | Visibility Timeout |
-|-------|------|-----------|-------------------|
-| pendingOrderQueue | Standard | 14 días | 30s |
-| ordersToSendQueue | Standard | 14 días | 30s |
+| Queue             | Type     | Retention | Visibility Timeout |
+| ----------------- | -------- | --------- | ------------------ |
+| pendingOrderQueue | Standard | 14 days   | 30s                |
+| ordersToSendQueue | Standard | 14 days   | 30s                |
 
 ### 🌐 API Gateway
 
-| Endpoint | Método | Integración | Autenticación |
-|----------|--------|-------------|---------------|
-| /order | POST | λ newOrder | None |
-| /order/{orderId} | GET | λ getOrder | None |
+| Endpoint         | Method | Integration | Authentication |
+| ---------------- | ------ | ----------- | -------------- |
+| /order           | POST   | λ newOrder  | None           |
+| /order/{orderId} | GET    | λ getOrder  | None           |
 
 ### 🔐 IAM Permissions
 
@@ -109,31 +109,31 @@ IAM Role Statements:
     - arn:aws:sqs:us-east-1:*:ordersToSendQueue
 ```
 
-## Patrones de Arquitectura Implementados
+## Implemented Architecture Patterns
 
 ### 1. **Event-Driven Architecture**
-- Uso de SQS para desacoplar componentes
-- Procesamiento asíncrono de órdenes
+- Use of SQS to decouple components
+- Asynchronous order processing
 
 ### 2. **Microservices Pattern**
-- Cada Lambda función tiene una responsabilidad específica
-- Comunicación a través de eventos
+- Each Lambda function has a specific responsibility
+- Communication through events
 
 ### 3. **Queue-Based Load Leveling**
-- SQS actúa como buffer para manejar picos de carga
-- Procesamiento controlado con batchSize
+- SQS acts as buffer to handle load spikes
+- Controlled processing with batchSize
 
 ### 4. **Serverless Pattern**
-- Sin gestión de infraestructura
-- Escalado automático basado en demanda
+- No infrastructure management
+- Automatic scaling based on demand
 
-## Consideraciones de Escalabilidad
+## Scalability Considerations
 
-- **Lambda Concurrency**: Hasta 1000 ejecuciones concurrentes por defecto
-- **SQS Throughput**: Hasta 300 transacciones por segundo
-- **API Gateway**: Hasta 10,000 RPS por región
+- **Lambda Concurrency**: Up to 1000 concurrent executions by default
+- **SQS Throughput**: Up to 300 transactions per second
+- **API Gateway**: Up to 10,000 RPS per region
 
-## Monitoreo y Observabilidad
+## Monitoring and Observability
 
 ```mermaid
 graph LR
@@ -146,18 +146,18 @@ graph LR
     CW --> Insights[CloudWatch Insights]
 ```
 
-### Métricas Clave:
+### Key Metrics:
 - **Lambda**: Duration, Errors, Throttles
 - **SQS**: Messages Sent, Messages Received, Queue Depth
 - **API Gateway**: Count, Latency, 4XX/5XX Errors
 
-## Costos Estimados (us-east-1)
+## Estimated Costs (us-east-1)
 
-| Servicio | Uso Mensual | Costo Aprox. |
-|----------|-------------|--------------|
-| Lambda | 1M requests | $0.20 |
-| API Gateway | 1M requests | $3.50 |
-| SQS | 1M requests | $0.40 |
-| **Total** | | **~$4.10/mes** |
+| Service     | Monthly Usage | Approx. Cost     |
+| ----------- | ------------- | ---------------- |
+| Lambda      | 1M requests   | $0.20            |
+| API Gateway | 1M requests   | $3.50            |
+| SQS         | 1M requests   | $0.40            |
+| **Total**   |               | **~$4.10/month** |
 
-*Costos basados en pricing de AWS a fecha actual*
+*Costs based on current AWS pricing*
