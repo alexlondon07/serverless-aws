@@ -1,7 +1,16 @@
 const { v4: uuidv4 } = require("uuid");
 const { SQSClient, SendMessageCommand } = require("@aws-sdk/client-sqs");
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { PutCommand, UpdateCommand, DynamoDBDocumentClient, GetCommand } = require("@aws-sdk/lib-dynamodb");
 
+// create an SQS client
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION });
+
+// create a DynamoDB client
+const client = new DynamoDBClient({ region: process.env.AWS_REGION });
+
+// Create a DynamoDB client
+const docClient = DynamoDBDocumentClient.from(client);
 
 /* Helper function to send a message to SQS */
 async function sendMessageToSQS(messageBody, queueUrl) {
@@ -17,6 +26,80 @@ async function sendMessageToSQS(messageBody, queueUrl) {
     return data;
   } catch (error) {
     console.error("Error sending message to SQS:", error);
+    throw error;
+  }
+}
+
+async function saveItemDinamoDB(item) {
+
+  const params = {
+    TableName: process.env.ORDERS_TABLE,
+    Item: item
+  }
+
+  try {
+    const command = new PutCommand(params);
+    const data = await docClient.send(command);
+    console.log("Item saved to DynamoDB:", data);
+    return data;
+  } catch (error) {
+    console.error("Error saving item to DynamoDB:", error);
+    throw error;
+  }
+}
+
+async function updateStatusInOrder(orderId, status) {
+  const params = {
+    TableName: process.env.ORDERS_TABLE,
+    Key: { orderId },
+    UpdateExpression: "set order_status = :newStatus",
+    ExpressionAttributeValues: {
+      ":newStatus": status,
+    },
+    ReturnValues: "ALL_NEW",
+  };
+
+  try {
+    const command = new UpdateCommand(params);
+    const response = await docClient.send(command);
+    console.log("Item updated succesfully in DynamoDB:", response.Attributes);
+    return response;
+  } catch (error) {
+    console.error("Error updating item in DynamoDB:", error);
+    throw error;
+  }
+}
+
+async function getItemFromDinamoDB(orderId) {
+ 
+  const params = {
+    TableName: process.env.ORDERS_TABLE,
+    Key: { orderId }
+  }
+
+  console.log("params", params);
+
+  try {
+    const command = new GetCommand(params);
+    const response = await docClient.send(command);
+
+    if(response.Item){
+
+      console.log( "Item get from DynamoDB:", response.Item);
+      return response.Item;
+
+    }else {
+
+      console.log("Item not found in DynamoDB:", response.Item);
+
+      let notFoundError = new Error("Item not found in DynamoDB");
+      notFoundError.name = "ItemNotFoundException";
+      notFoundError.statusCode = 404;
+      throw notFoundError;
+    }
+
+  } catch (error) {
+    console.error("Error getting item from DynamoDB:", error);
     throw error;
   }
 }
@@ -39,9 +122,13 @@ exports.newOrder = async (event) => {
 
   console.log("Order details:", orderDetails);
 
-  const PENDING_ORDER_QUEUE_URL = process.env.PENDING_ORDER_QUEUE_URL;
-
   const order = { orderId, ...orderDetails };
+
+  // Save order in the database
+  await saveItemDinamoDB(order);
+
+  // Send message to the queue
+  const PENDING_ORDER_QUEUE_URL = process.env.PENDING_ORDER_QUEUE_URL;
 
   try {
     await sendMessageToSQS(order, PENDING_ORDER_QUEUE_URL);
@@ -63,23 +150,33 @@ exports.newOrder = async (event) => {
 
 /* HTTP GET: /order/{orderId} */
 exports.getOrder = async (event) => {
-  console.log("Obteniendo detalles de la orden:", JSON.stringify(event));
+  console.log(event);
 
-  const orderId = event.pathParameters?.orderId || "desconocido";
+  const orderId = event.pathParameters.orderId;
 
-  // Datos simulados
-  const orderDetails = {
-    pizza: "Pepperoni",
-    customerId: "12345",
-    order_status: "COMPLETED",
-  };
+  try {
+    const order = await getItemFromDinamoDB(orderId);
+    console.log("Order details:", order);
+    return {
+      statusCode: 200,
+      body: JSON.stringify(order),
+    };
+  } catch (error) {
+    console.error("Error getting order:", error);
 
-  const order = { orderId, ...orderDetails };
-
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ message: order }),
-  };
+    if(error.name === "ItemNotFoundException"){
+      return {
+        statusCode: error.statusCode,
+        body: JSON.stringify({ message: "order not found" }),
+      };
+    } else {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ message: "Error retrieving order" }),
+      };
+    }
+  }
+  
 };
 
 exports.sendOrder = async (event) => {
@@ -116,5 +213,12 @@ exports.sendOrder = async (event) => {
 /* SQS Event */
 exports.prepOrder = async (event) => {
   console.log("Valid prepOrder ", JSON.stringify(event));
+
+  const body = JSON.parse(event.Records[0].body);
+  const orderId = body.orderId;
+
+  await updateStatusInOrder(orderId, "COMPLETED");
+
   return;
 };
+
