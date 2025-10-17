@@ -1,10 +1,10 @@
 # Pizza App - Serverless Framework
 
-Pizza order management system built with AWS Lambda, API Gateway and SQS using Serverless Framework.
+Pizza order management system built with AWS Lambda, API Gateway, SQS, and DynamoDB using Serverless Framework.
 
 ## 📋 Description
 
-This serverless application allows receiving, processing and managing pizza orders using an event-driven architecture with AWS Lambda and SQS queues for asynchronous processing.
+This serverless application allows receiving, processing and managing pizza orders using an event-driven architecture with AWS Lambda, SQS queues for asynchronous processing, and DynamoDB for data persistence.
 
 ## 🏗️ Architecture
 
@@ -17,17 +17,23 @@ This serverless application allows receiving, processing and managing pizza orde
 │ GET /order/{id} │───▶│ getOrder         │    │                     │
 └─────────────────┘    └──────────────────┘    └─────────────────────┘
                                 │                         │
+                                ▼                         ▼
+                       ┌──────────────────┐    ┌─────────────────────┐
+                       │   DynamoDB       │    │ prepOrder           │
+                       │   Orders Table   │◀───│ (SQS Consumer)      │
+                       └──────────────────┘    └─────────────────────┘
+                                ▲                         │
                                 │                         ▼
-                       ┌──────────────────┐    ┌─────────────────────┐
-                       │ prepOrder        │◀───│ SQS Trigger         │
-                       │ (SQS Consumer)   │    │                     │
-                       └──────────────────┘    └─────────────────────┘
-                                │
-                                ▼
-                       ┌──────────────────┐    ┌─────────────────────┐
-                       │ sendOrder        │───▶│ ordersToSendQueue   │
-                       │                  │    │                     │
-                       └──────────────────┘    └─────────────────────┘
+                                │              ┌─────────────────────┐
+                                └──────────────│ sendOrder           │
+                                               │                     │
+                                               └─────────────────────┘
+                                                         │
+                                                         ▼
+                                               ┌─────────────────────┐
+                                               │ ordersToSendQueue   │
+                                               │                     │
+                                               └─────────────────────┘
 ```
 
 ## 🚀 Lambda Functions
@@ -35,28 +41,34 @@ This serverless application allows receiving, processing and managing pizza orde
 ### 1. newOrder
 - **Handler**: `handler.newOrder`
 - **Trigger**: HTTP POST `/order`
-- **Purpose**: Receives new pizza orders and sends them to processing queue
+- **Purpose**: Receives new pizza orders, stores them in DynamoDB and sends them to processing queue
 - **Environment Variables**:
   - `PENDING_ORDER_QUEUE_URL`: URL of pending orders queue
+  - `ORDERS_TABLE`: DynamoDB table name for orders
 - **Flow**:
   1. Generates unique UUID for the order
   2. Parses order details from body
-  3. Sends order to `pendingOrderQueue`
-  4. Returns confirmation with order details
+  3. Stores order in DynamoDB Orders table
+  4. Sends order to `pendingOrderQueue`
+  5. Returns confirmation with order details
 
 ### 2. getOrder
 - **Handler**: `handler.getOrder`
 - **Trigger**: HTTP GET `/order/{orderId}`
-- **Purpose**: Queries details of a specific order
+- **Purpose**: Retrieves order details from DynamoDB
+- **Environment Variables**:
+  - `ORDERS_TABLE`: DynamoDB table name for orders
 - **Parameters**: `orderId` (path parameter)
-- **Response**: Simulated order details (pizza, customerId, status)
+- **Response**: Order details from DynamoDB (pizza, customerId, status, etc.)
 
 ### 3. prepOrder
 - **Handler**: `handler.prepOrder`
 - **Trigger**: SQS Event from `pendingOrderQueue`
-- **Purpose**: Processes pending orders from queue
+- **Purpose**: Processes pending orders from queue and updates order status in DynamoDB
+- **Environment Variables**:
+  - `ORDERS_TABLE`: DynamoDB table name for orders
 - **Configuration**: `batchSize: 1` (processes one message at a time)
-- **Current State**: Placeholder function for preparation logic
+- **Flow**: Updates order status to "preparing" or "ready" in DynamoDB
 
 ### 4. sendOrder
 - **Handler**: `handler.sendOrder`
@@ -64,6 +76,7 @@ This serverless application allows receiving, processing and managing pizza orde
 - **Purpose**: Sends processed orders to shipping queue
 - **Environment Variables**:
   - `ORDERS_TO_SEND_QUEUE_URL`: URL of orders to send queue
+- **Flow**: Moves orders to shipping queue for delivery processing
 
 ## 🌐 HTTP Endpoints
 
@@ -96,8 +109,14 @@ curl https://your-api-gateway-url/order/uuid-here
 1. **pendingOrderQueue**: Queue for new orders pending processing
 2. **ordersToSendQueue**: Queue for orders ready for shipping
 
+### DynamoDB Tables
+1. **Orders**: Main table for storing order data
+   - **Primary Key**: `orderId` (String)
+   - **Provisioned Throughput**: 1 RCU / 1 WCU
+
 ### IAM Permissions
 - `sqs:sendMessage` on both SQS queues
+- `dynamodb:PutItem`, `dynamodb:GetItem`, `dynamodb:UpdateItem` on Orders table
 - Automatic roles for Lambda execution
 
 ## 🛠️ Configuration
@@ -114,7 +133,9 @@ curl https://your-api-gateway-url/order/uuid-here
 ```json
 {
   "uuid": "^11.1.0",
-  "@aws-sdk/client-sqs": "included in runtime"
+  "@aws-sdk/client-sqs": "included in runtime",
+  "@aws-sdk/client-dynamodb": "included in runtime",
+  "@aws-sdk/lib-dynamodb": "included in runtime"
 }
 ```
 
@@ -134,19 +155,21 @@ serverless remove
 ## 📊 Data Flow
 
 1. **Client** sends POST to `/order`
-2. **newOrder** generates UUID and sends to `pendingOrderQueue`
-3. **prepOrder** is automatically triggered by SQS trigger
+2. **newOrder** generates UUID, stores in DynamoDB, and sends to `pendingOrderQueue`
+3. **prepOrder** is automatically triggered by SQS, processes order and updates status in DynamoDB
 4. **sendOrder** can be invoked to move orders to `ordersToSendQueue`
-5. **Client** can query status with GET `/order/{id}`
+5. **Client** can query order status from DynamoDB with GET `/order/{id}`
 
 ## 🔧 Suggested Improvements
 
-- Implement DynamoDB persistence
-- Add schema validation
-- Implement robust error handling
-- Add structured logging
-- Implement unit tests
-- Add CloudWatch monitoring
+- Add schema validation for order data
+- Implement robust error handling and retry logic
+- Add structured logging with correlation IDs
+- Implement unit and integration tests
+- Add CloudWatch monitoring and alarms
+- Implement order status tracking workflow
+- Add API authentication and authorization
+- Implement dead letter queues for failed messages
 
 ## 👨💻 Author
 
